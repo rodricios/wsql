@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel", "packaging>=24.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wsql"
+version = "0.0.1"
+description = "WSQL - a declarative SQL-like language for web crawling and extraction"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "Rodrigo Palacios", email = "rodrigopala91@gmail.com" }
+]
+license = "AGPL-3.0"
+license-files = ["LICENSE"]
+
+dependencies = [
+    "lxml>=4.0",
+    "elementpath>=5.0.0,<=5.0.3",
+    "aiohttp>=3.8.0,<=4.0.0",
+    "tqdm>=4.0.0",
+    "wxpath>=0.5.2"
+]
+
+[project.urls]
+Homepage = "https://rodricios.github.io/wsql"
+Documentation = "https://rodricios.github.io/wsql"
+Repository = "https://github.com/rodricios/wsql"
+Issues = "https://github.com/rodricios/wsql/issues"
+Changelog = "https://github.com/rodricios/wsql/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+cache = ["aiohttp-client-cache>=0.14.0"]
+cache-sqlite = ["aiohttp-client-cache[sqlite]"]
+cache-redis = ["aiohttp-client-cache[redis]"]
+test = ["pytest>=7.0", "pytest-asyncio>=0.23"]
+dev = ["ruff", "tox"]
+docs = ["mkdocs>=1.5", "mkdocs-material>=9.0", "mkdocstrings[python]>=0.24", "mkdocs-macros-plugin>=1.0", "mkdocs-resize-images>=1.0", "mkdocs-glightbox", "pyyaml>=6.0"]
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q --ignore=tests/test_nlwsql_service.py"
+testpaths = ["tests"]
+norecursedirs = ["experiment", "tests/experiment", "nlwsql"]
+
+[tool.setuptools]
+packages = ["wsql", "wsql.core", "wsql.runtime", "wsql.util"]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+exclude = ["src/wsql/nlwsql", "tests/test_nlwsql_service.py"]
+
+lint.select = [
+    "F",
+    "E",
+    "B",
+    "ASYNC",
+    "I",
+    "TID",
+    "ICN",
+]
+
+[tool.ruff.format]
+quote-style = "single"

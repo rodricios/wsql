@@ -1,0 +1,60 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.py.class
+*.so
+
+# Virtual environments
+.venv/
+venv/
+pyvenv.cfg
+share/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+wheelhouse/
+site-packages/
+dist-packages/
+
+# Test / tool caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.cursorindexingignore
+
+# Project tooling
+.claude/
+.serena/
+.specstory/
+.mplconfig/
+
+# MkDocs image tooling
+assets/images-large/
+.resize-hash/
+
+# Deferred / experimental work (not part of the initial release)
+experiment/
+experiment/*
+src/wsql/nlwsql/
+tests/test_nlwsql_service.py
+README_nl.md
+wsql_vs_scrapy_side_by_side.png
+
+# Archives
+*.zip
+
+# Local env
+*.exe
+*.cmd
