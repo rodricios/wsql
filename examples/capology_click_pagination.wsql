@@ -1,0 +1,8 @@
+SELECT
+    td[@class='name-column']//text() AS name,
+    td[@class='money-column'][2]//text() AS annual_salary
+FROM https://www.capology.com/uk/premier-league/salaries/
+    PER //tbody/tr
+    CLICK //a[@aria-label='next page']
+    PAGES 20
+    CRAWLER playwright

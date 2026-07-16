@@ -133,6 +133,32 @@ FROM https://quotes.toscrape.com
 - `FOLLOW` - link XPath for pagination / discovery.
 - `DEPTH` - maximum crawl depth.
 
+### Button-press pagination (`CLICK` / `PAGES`)
+
+Some tables paginate via a JavaScript button ("Next", DataTables `paginate_button`)
+instead of a link with a fetchable `href`. `FOLLOW` cannot express this, since there
+is no new URL to request. `CLICK` fills that gap: it names an XPath to an on-page
+control, clicks it on a live Playwright page, re-extracts, and repeats.
+
+```sql
+SELECT
+    td[@class='name-column']//text() AS name,
+    td[@class='money-column'][2]//text() AS annual_salary
+FROM https://www.capology.com/uk/premier-league/salaries/
+    PER //tbody/tr
+    CLICK //a[@aria-label='next page']
+    PAGES 20
+    CRAWLER playwright
+```
+
+- `CLICK <xpath>` - XPath naming the pagination control to click on the current page.
+- `PAGES <int>` - maximum number of page snapshots to extract.
+- `CLICK` requires `CRAWLER playwright` (a real browser page must stay open across
+  clicks); the executor raises a clear error if another crawler is selected.
+- `FOLLOW` and `CLICK` cannot be combined on the same `FROM` clause.
+
+Transpiles to wxpath's `wx:paginate(...)` operator.
+
 ### Subqueries (URL generation)
 
 In WSQL, a `FROM (SELECT ...) AS alias` subquery does **not** materialize a temp table.

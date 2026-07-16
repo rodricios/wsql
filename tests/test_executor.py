@@ -70,7 +70,11 @@ class _TestExecutorWithMockEngine(WSQLExecutor):
         super().__init__(**kwargs)
         self._mock_engine = mock_engine
 
-    def _create_engine(self, crawler_name: str | None = None) -> Any:
+    def _create_engine(
+        self,
+        crawler_name: str | None = None,
+        from_clause: Any = None,
+    ) -> Any:
         return self._mock_engine
 
 
@@ -166,7 +170,9 @@ async def test_execute_uses_inline_crawler_name_over_defaults() -> None:
 
     assert len(results) == 1
     assert results[0]['title'] == 'Inline crawler wins'
-    mocked_create.assert_called_once_with('aiohttp')
+    assert mocked_create.call_count == 1
+    assert mocked_create.call_args.args[0] == 'aiohttp'
+    assert mocked_create.call_args.args[1].crawler_name == 'aiohttp'
 
 
 def test_executor_uses_default_crawler_name_when_query_omits_crawler() -> None:
@@ -197,6 +203,48 @@ def test_executor_allows_engine_to_create_default_crawler_when_unspecified() -> 
 
     assert isinstance(engine, WXPathEngine)
     assert isinstance(engine.crawler, Crawler)
+
+
+def test_executor_click_pagination_requires_playwright_crawler() -> None:
+    """CLICK pagination without CRAWLER playwright raises a clear error."""
+    executor = WSQLExecutor()
+    query = parse(
+        "SELECT //td/text() AS name FROM https://example.com "
+        "PER //tr CLICK //a[@class='next']"
+    )
+    with pytest.raises(ValueError, match='CLICK pagination requires CRAWLER playwright'):
+        executor._create_engine(
+            query.main_query.from_clause.crawler_name,
+            query.main_query.from_clause,
+        )
+
+
+def test_executor_click_pagination_accepts_inline_crawler_playwright() -> None:
+    """CLICK pagination with inline CRAWLER playwright is accepted."""
+    executor = WSQLExecutor()
+    query = parse(
+        "SELECT //td/text() AS name FROM https://example.com "
+        "PER //tr CLICK //a[@class='next'] CRAWLER playwright"
+    )
+    engine = executor._create_engine(
+        query.main_query.from_clause.crawler_name,
+        query.main_query.from_clause,
+    )
+    assert isinstance(engine, WXPathEngine)
+
+
+def test_executor_click_pagination_accepts_default_crawler_playwright() -> None:
+    """CLICK pagination validated against the executor's default_crawler_name."""
+    executor = WSQLExecutor(default_crawler_name='playwright')
+    query = parse(
+        "SELECT //td/text() AS name FROM https://example.com "
+        "PER //tr CLICK //a[@class='next']"
+    )
+    engine = executor._create_engine(
+        query.main_query.from_clause.crawler_name,
+        query.main_query.from_clause,
+    )
+    assert isinstance(engine, WXPathEngine)
 
 
 # --------------------------------------------------------------------
@@ -330,7 +378,7 @@ async def test_cte_collection() -> None:
 
 @pytest.mark.asyncio
 async def test_multiple_ctes() -> None:
-    """Multiple CTEs — only the primary JOIN CTE uses horizontal execution."""
+    """Multiple CTEs - only the primary JOIN CTE uses horizontal execution."""
     query = """
         WITH cte1 AS (
             SELECT //h1/text() AS title
