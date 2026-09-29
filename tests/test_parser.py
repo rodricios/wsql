@@ -154,6 +154,30 @@ def test_parse_rejects_follow_combined_with_click() -> None:
         parse(source)
 
 
+@pytest.mark.parametrize(
+    'modifier,reason',
+    [
+        ('PAGES 2', 'PAGES requires CLICK'),
+        ('CLICK //a PAGES 0', 'PAGES must be at least 1'),
+        ('CLICK CRAWLER playwright', 'CLICK requires a non-empty XPath'),
+    ],
+)
+def test_parse_rejects_invalid_click_page_options(modifier: str, reason: str) -> None:
+    source = f'SELECT //li/text() AS name FROM https://example.com {modifier}'
+    with pytest.raises(ValueError, match=reason):
+        parse(source)
+
+
+def test_transpile_rejects_click_inside_url_subquery() -> None:
+    source = (
+        'SELECT //h1/text() AS title FROM ('
+        'SELECT //a/@href FROM https://example.com CLICK //button CRAWLER playwright'
+        ') AS links'
+    )
+    with pytest.raises(ValueError, match='not supported inside a FROM subquery'):
+        transpile(parse(source))
+
+
 def test_parse_url_template_cte_dependencies_and_projections() -> None:
     """URL templates with {cte.field} record dependencies and projections."""
     source = """
@@ -310,8 +334,7 @@ def test_transpile_click_emits_paginate_segment() -> None:
 def test_transpile_click_without_pages_omits_pages_arg() -> None:
     """CLICK without PAGES produces a Paginate with no Pages argument."""
     program = parse(
-        "SELECT //td/text() AS name FROM https://example.com "
-        "PER //tr CLICK //a[@class='next']"
+        "SELECT //td/text() AS name FROM https://example.com PER //tr CLICK //a[@class='next']"
     )
     segments = transpile(program)
     paginate_seg = segments[1]

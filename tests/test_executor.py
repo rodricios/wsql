@@ -209,8 +209,7 @@ def test_executor_click_pagination_requires_playwright_crawler() -> None:
     """CLICK pagination without CRAWLER playwright raises a clear error."""
     executor = WSQLExecutor()
     query = parse(
-        "SELECT //td/text() AS name FROM https://example.com "
-        "PER //tr CLICK //a[@class='next']"
+        "SELECT //td/text() AS name FROM https://example.com PER //tr CLICK //a[@class='next']"
     )
     with pytest.raises(ValueError, match='CLICK pagination requires CRAWLER playwright'):
         executor._create_engine(
@@ -223,7 +222,7 @@ def test_executor_click_pagination_accepts_inline_crawler_playwright() -> None:
     """CLICK pagination with inline CRAWLER playwright is accepted."""
     executor = WSQLExecutor()
     query = parse(
-        "SELECT //td/text() AS name FROM https://example.com "
+        'SELECT //td/text() AS name FROM https://example.com '
         "PER //tr CLICK //a[@class='next'] CRAWLER playwright"
     )
     engine = executor._create_engine(
@@ -237,8 +236,7 @@ def test_executor_click_pagination_accepts_default_crawler_playwright() -> None:
     """CLICK pagination validated against the executor's default_crawler_name."""
     executor = WSQLExecutor(default_crawler_name='playwright')
     query = parse(
-        "SELECT //td/text() AS name FROM https://example.com "
-        "PER //tr CLICK //a[@class='next']"
+        "SELECT //td/text() AS name FROM https://example.com PER //tr CLICK //a[@class='next']"
     )
     engine = executor._create_engine(
         query.main_query.from_clause.crawler_name,

@@ -699,6 +699,12 @@ class WSQLParser:
                 'FOLLOW and CLICK cannot be combined on the same FROM clause; '
                 'FOLLOW is HTTP link pagination, CLICK is in-page button pagination'
             )
+        if found_click and not click:
+            raise ValueError('CLICK requires a non-empty XPath')
+        if found_pages and not click:
+            raise ValueError('PAGES requires CLICK on the same FROM clause')
+        if click_pages is not None and click_pages < 1:
+            raise ValueError('PAGES must be at least 1')
 
         expected_projections = [
             ParentQueryFieldRef(cte_name=cte_name, cte_field=cte_field)
@@ -842,6 +848,8 @@ def _transpile_query(query: WSQLQuery, is_subquery: bool = False) -> Segments:
     #            and the column select expression is a xpath expression
     #            that produces a list of URLs
     if is_subquery:
+        if fc.click:
+            raise ValueError('CLICK pagination is not supported inside a FROM subquery')
         assert len(query.select) == 1, 'Subquery must have exactly one SELECT column'
 
         url_from_xpath = UrlQuery(
