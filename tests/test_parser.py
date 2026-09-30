@@ -7,7 +7,16 @@ models (``JoinedCrawl``, ``JoinedExtract``).
 from __future__ import annotations
 
 import pytest
-from wxpath.core.parser import Segments, UrlCrawl, UrlLiteral, UrlQuery, Xpath
+from wxpath.core.parser import (
+    Click,
+    Pages,
+    Paginate,
+    Segments,
+    UrlCrawl,
+    UrlLiteral,
+    UrlQuery,
+    Xpath,
+)
 
 from wsql.core.models import (
     JoinedCrawl,
@@ -99,6 +108,74 @@ def test_parse_from_clause_with_per_follow_depth_crawler() -> None:
     assert fc.follow == '//a/@href'
     assert fc.depth == 3
     assert fc.crawler_name == 'custom_spider'
+
+
+def test_parse_from_clause_with_click_and_pages() -> None:
+    """Parse FROM clause with CLICK and PAGES pagination modifiers."""
+    source = """
+    SELECT td[@class='name-column']//text() AS name
+    FROM https://www.capology.com/uk/premier-league/salaries/
+    PER //tbody/tr
+    CLICK //a[@aria-label='next page']
+    PAGES 20
+    CRAWLER playwright
+    """
+    program = parse(source)
+    fc = program.main_query.from_clause
+    assert fc.per == '//tbody/tr'
+    assert fc.click == "//a[@aria-label='next page']"
+    assert fc.click_pages == 20
+    assert fc.crawler_name == 'playwright'
+
+
+def test_parse_from_clause_with_click_and_no_pages_limit() -> None:
+    """CLICK without a PAGES modifier leaves click_pages unset."""
+    source = """
+    SELECT //td/text() AS name
+    FROM https://example.com
+    PER //tr
+    CLICK //a[@class='next']
+    """
+    program = parse(source)
+    fc = program.main_query.from_clause
+    assert fc.click == "//a[@class='next']"
+    assert fc.click_pages is None
+
+
+def test_parse_rejects_follow_combined_with_click() -> None:
+    """FOLLOW and CLICK on the same FROM clause are mutually exclusive."""
+    source = """
+    SELECT //td/text() AS name
+    FROM https://example.com
+    FOLLOW //a/@href
+    CLICK //a[@class='next']
+    """
+    with pytest.raises(ValueError, match='FOLLOW and CLICK cannot be combined'):
+        parse(source)
+
+
+@pytest.mark.parametrize(
+    'modifier,reason',
+    [
+        ('PAGES 2', 'PAGES requires CLICK'),
+        ('CLICK //a PAGES 0', 'PAGES must be at least 1'),
+        ('CLICK CRAWLER playwright', 'CLICK requires a non-empty XPath'),
+    ],
+)
+def test_parse_rejects_invalid_click_page_options(modifier: str, reason: str) -> None:
+    source = f'SELECT //li/text() AS name FROM https://example.com {modifier}'
+    with pytest.raises(ValueError, match=reason):
+        parse(source)
+
+
+def test_transpile_rejects_click_inside_url_subquery() -> None:
+    source = (
+        'SELECT //h1/text() AS title FROM ('
+        'SELECT //a/@href FROM https://example.com CLICK //button CRAWLER playwright'
+        ') AS links'
+    )
+    with pytest.raises(ValueError, match='not supported inside a FROM subquery'):
+        transpile(parse(source))
 
 
 def test_parse_url_template_cte_dependencies_and_projections() -> None:
@@ -228,6 +305,42 @@ def test_transpile_respects_per_prefix() -> None:
     map_seg = segments[-1]
     assert isinstance(map_seg, Xpath)
     assert map_seg.value.startswith('//article')
+
+
+def test_transpile_click_emits_paginate_segment() -> None:
+    """CLICK clause is transpiled into a wx:paginate segment wrapping the map."""
+    source = """
+    SELECT //td/text() AS name
+    FROM https://www.capology.com/uk/premier-league/salaries/
+    PER //tbody/tr
+    CLICK //a[@aria-label='next page']
+    PAGES 10
+    """
+    program = parse(source)
+    segments = transpile(program)
+    assert len(segments) == 2
+    url_seg, paginate_seg = segments
+    assert isinstance(url_seg, UrlLiteral)
+    assert isinstance(paginate_seg, Paginate)
+    assert paginate_seg.func == '//wx:paginate'
+    assert isinstance(paginate_seg.args[0], Xpath)
+    assert paginate_seg.args[0].value.startswith('//tbody/tr')
+    assert isinstance(paginate_seg.args[1], Click)
+    assert paginate_seg.args[1].value == "//a[@aria-label='next page']"
+    assert isinstance(paginate_seg.args[2], Pages)
+    assert paginate_seg.args[2].value == 10
+
+
+def test_transpile_click_without_pages_omits_pages_arg() -> None:
+    """CLICK without PAGES produces a Paginate with no Pages argument."""
+    program = parse(
+        "SELECT //td/text() AS name FROM https://example.com PER //tr CLICK //a[@class='next']"
+    )
+    segments = transpile(program)
+    paginate_seg = segments[1]
+    assert isinstance(paginate_seg, Paginate)
+    assert len(paginate_seg.args) == 2
+    assert isinstance(paginate_seg.args[1], Click)
 
 
 def test_transpile_subquery_uses_url_query() -> None:

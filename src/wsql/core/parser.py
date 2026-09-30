@@ -33,7 +33,10 @@ from collections import defaultdict
 from typing import Iterator
 
 from wxpath.core.parser import (
+    Click,
     Depth,
+    Pages,
+    Paginate,
     Segments,
     String,
     UrlCrawl,
@@ -75,7 +78,9 @@ class WSQLParser:
         query         -> SELECT columns FROM from_clause join_clauses?
         columns       -> column (',' column)*
         column        -> expr (AS ident)?
-        from_clause   -> (url | '(' query ')') (PER xpath)? (FOLLOW xpath)? (DEPTH int)?
+        from_clause   -> (url | '(' query ')')
+                          (PER xpath | FOLLOW xpath | DEPTH int
+                           | CLICK xpath | PAGES int | CRAWLER ident)*
         join_clauses  -> (join_type JOIN ident (ON expr))*
         join_type     -> INNER | LEFT | RIGHT | CROSS | FULL
 
@@ -93,6 +98,8 @@ class WSQLParser:
             'PER',
             'FOLLOW',
             'DEPTH',
+            'CLICK',
+            'PAGES',
             'CRAWLER',
             'INNER',
             'LEFT',
@@ -126,6 +133,8 @@ class WSQLParser:
         {
             'FOLLOW',
             'DEPTH',
+            'CLICK',
+            'PAGES',
             'CRAWLER',
             'INNER',
             'LEFT',
@@ -141,6 +150,25 @@ class WSQLParser:
         {
             'PER',
             'DEPTH',
+            'CLICK',
+            'PAGES',
+            'CRAWLER',
+            'INNER',
+            'LEFT',
+            'RIGHT',
+            'CROSS',
+            'FULL',
+            'JOIN',
+        }
+    )
+
+    # Keywords that terminate a CLICK xpath expression.
+    _CLICK_STOP_KW: frozenset[str] = frozenset(
+        {
+            'PER',
+            'FOLLOW',
+            'DEPTH',
+            'PAGES',
             'CRAWLER',
             'INNER',
             'LEFT',
@@ -157,6 +185,8 @@ class WSQLParser:
             'PER',
             'FOLLOW',
             'DEPTH',
+            'CLICK',
+            'PAGES',
             'CRAWLER',
             'INNER',
             'LEFT',
@@ -184,6 +214,8 @@ class WSQLParser:
             'PER',
             'FOLLOW',
             'DEPTH',
+            'CLICK',
+            'PAGES',
             'INNER',
             'LEFT',
             'RIGHT',
@@ -576,15 +608,20 @@ class WSQLParser:
     # -- FROM clause ------------------------------------------------
 
     def _parse_from_clause(self) -> FromClause:
-        """Parse ``<url_or_subquery> [PER <xpath>] [FOLLOW <xpath>] [DEPTH <int>]``.
+        """Parse ``<url_or_subquery> [PER <xpath>] [FOLLOW <xpath>] [DEPTH <int>]
+        [CLICK <xpath>] [PAGES <int>] [CRAWLER <ident>]``.
 
         Supports two source patterns:
 
             1. URL literal: ``FROM https://example.com ...``
             2. Subquery:    ``FROM (SELECT ... FROM ... ) ...``
 
-        ``PER``, ``FOLLOW``, and ``DEPTH`` may appear in any order after
-        the source.
+        ``PER``, ``FOLLOW``, ``DEPTH``, ``CLICK``, ``PAGES``, and
+        ``CRAWLER`` may appear in any order after the source. ``CLICK``
+        paginates by clicking a DOM element (e.g. a "Next" button) and
+        re-extracting in place, with no new network request; it requires
+        ``CRAWLER playwright``. ``PAGES`` bounds the number of page
+        snapshots extracted.
         """
         self._skip_ws()
 
@@ -623,10 +660,13 @@ class WSQLParser:
         per: str | None = None
         follow: str | None = None
         depth: int = 1
+        click: str | None = None
+        click_pages: int | None = None
         crawler_name: str | None = None
-        found_per = found_follow = found_depth = found_crawler_name = False
+        found_per = found_follow = found_depth = False
+        found_click = found_pages = found_crawler_name = False
 
-        for _ in range(4):
+        for _ in range(6):
             if not found_per and self._peek_keyword('PER'):
                 self._consume_keyword('PER')
                 per = self._capture_balanced(stop_keywords=self._PER_STOP_KW)
@@ -639,12 +679,32 @@ class WSQLParser:
                 self._consume_keyword('DEPTH')
                 depth = self._consume_integer()
                 found_depth = True
+            elif not found_click and self._peek_keyword('CLICK'):
+                self._consume_keyword('CLICK')
+                click = self._capture_balanced(stop_keywords=self._CLICK_STOP_KW)
+                found_click = True
+            elif not found_pages and self._peek_keyword('PAGES'):
+                self._consume_keyword('PAGES')
+                click_pages = self._consume_integer()
+                found_pages = True
             elif not found_crawler_name and self._peek_keyword('CRAWLER'):
                 self._consume_keyword('CRAWLER')
                 crawler_name = self._consume_identifier()
                 found_crawler_name = True
             else:
                 break
+
+        if follow and click:
+            raise ValueError(
+                'FOLLOW and CLICK cannot be combined on the same FROM clause; '
+                'FOLLOW is HTTP link pagination, CLICK is in-page button pagination'
+            )
+        if found_click and not click:
+            raise ValueError('CLICK requires a non-empty XPath')
+        if found_pages and not click:
+            raise ValueError('PAGES requires CLICK on the same FROM clause')
+        if click_pages is not None and click_pages < 1:
+            raise ValueError('PAGES must be at least 1')
 
         expected_projections = [
             ParentQueryFieldRef(cte_name=cte_name, cte_field=cte_field)
@@ -656,6 +716,8 @@ class WSQLParser:
             per=per,
             follow=follow,
             depth=depth,
+            click=click,
+            click_pages=click_pages,
             crawler_name=crawler_name,
             cte_dependencies=cte_dependencies,
             expected_projections=expected_projections,
@@ -786,6 +848,8 @@ def _transpile_query(query: WSQLQuery, is_subquery: bool = False) -> Segments:
     #            and the column select expression is a xpath expression
     #            that produces a list of URLs
     if is_subquery:
+        if fc.click:
+            raise ValueError('CLICK pagination is not supported inside a FROM subquery')
         assert len(query.select) == 1, 'Subquery must have exactly one SELECT column'
 
         url_from_xpath = UrlQuery(
@@ -802,7 +866,16 @@ def _transpile_query(query: WSQLQuery, is_subquery: bool = False) -> Segments:
 
         if query.from_clause.per:
             map_xpath.value = query.from_clause.per + map_xpath.value
-        segments.append(map_xpath)
+
+        if query.from_clause.click:
+            # Emit wx:paginate(extract, click=..., pages=...) matching the
+            # user's declarative click-pagination form.
+            paginate_args: list = [Xpath(map_xpath.value), Click(query.from_clause.click)]
+            if query.from_clause.click_pages is not None:
+                paginate_args.append(Pages(query.from_clause.click_pages))
+            segments.append(Paginate('//wx:paginate', paginate_args))
+        else:
+            segments.append(map_xpath)
 
     return segments
 

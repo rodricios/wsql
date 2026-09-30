@@ -131,6 +131,10 @@ class FromClause:
         per: Optional XPath expression defining the row anchor.
         follow: Optional XPath expression identifying links to follow.
         depth: Maximum crawl depth (default ``1``).
+        click: Optional XPath selecting an in-page control to click for
+            non-request pagination (requires ``CRAWLER playwright``).
+        click_pages: Optional maximum number of page snapshots to extract
+            when ``click`` is set.
         cte_dependencies: List of CTE names that this FROM clause depends on.
     """
 
@@ -139,6 +143,8 @@ class FromClause:
     per: str | None = None
     follow: str | None = None
     depth: int = 1
+    click: str | None = None
+    click_pages: int | None = None
     crawler_name: str | None = None
     cte_dependencies: list[str] = field(default_factory=list)
     expected_projections: list[ParentQueryFieldRef] = field(default_factory=list)

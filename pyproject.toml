@@ -19,7 +19,7 @@ dependencies = [
     "elementpath>=5.0.0,<=5.0.3",
     "aiohttp>=3.8.0,<=4.0.0",
     "tqdm>=4.0.0",
-    "wxpath>=0.5.2"
+    "wxpath>=0.7.0"
 ]
 
 [project.urls]
@@ -33,6 +33,7 @@ Changelog = "https://github.com/rodricios/wsql/blob/main/CHANGELOG.md"
 cache = ["aiohttp-client-cache>=0.14.0"]
 cache-sqlite = ["aiohttp-client-cache[sqlite]"]
 cache-redis = ["aiohttp-client-cache[redis]"]
+playwright = ["playwright>=1.57.0,<2.0.0", "playwright-stealth>=2.0.0,<3.0.0"]
 test = ["pytest>=7.0", "pytest-asyncio>=0.23"]
 dev = ["ruff", "tox"]
 docs = ["mkdocs>=1.5", "mkdocs-material>=9.0", "mkdocstrings[python]>=0.24", "mkdocs-macros-plugin>=1.0", "mkdocs-resize-images>=1.0", "mkdocs-glightbox", "pyyaml>=6.0"]

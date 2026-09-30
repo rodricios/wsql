@@ -51,6 +51,7 @@ from wxpath.http.client import crawler as crawler_module
 
 from wsql.core.models import (
     CTE,
+    FromClause,
     UrlCrawlWithProjection,
     WSQLProgram,
     WSQLQuery,
@@ -111,6 +112,24 @@ def _get_crawler_class(crawler_name: str | None = None) -> type[Any]:
     return CRAWLER_NAME_TO_CRAWLER_CLASS[crawler_name]
 
 
+def _validate_click_requires_playwright(
+    from_clause: FromClause,
+    resolved_crawler_name: str | None,
+) -> None:
+    """Ensure ``CLICK`` pagination only runs under the playwright crawler.
+
+    Raises:
+        ValueError: If ``from_clause.click`` is set but the resolved
+            crawler is not ``\"playwright\"``.
+    """
+    if from_clause.click and resolved_crawler_name != 'playwright':
+        raise ValueError(
+            'CLICK pagination requires CRAWLER playwright (got '
+            f'{resolved_crawler_name!r}). Add CRAWLER playwright to the '
+            'FROM clause or configure default_crawler_name="playwright".'
+        )
+
+
 class WSQLExecutor:
     """High-level executor for WSQL programs.
 
@@ -152,6 +171,7 @@ class WSQLExecutor:
         playwright_stealth: bool = False,
         flaresolverr_url: str = 'http://localhost:8191/v1',
         yield_errors: bool = False,
+        download_delay: float | None = None,
         **legacy_kwargs: Any,
     ) -> None:
         if 'engine' in legacy_kwargs:
@@ -182,6 +202,9 @@ class WSQLExecutor:
         self._playwright_stealth = playwright_stealth
         self._flaresolverr_url = flaresolverr_url
         self.yield_errors = yield_errors
+        self._download_delay = (
+            max(0.0, float(download_delay)) if download_delay is not None else None
+        )
 
     def _resolve_crawler_name(self, crawler_name: str | None = None) -> str | None:
         """Resolve crawler name with expression value taking precedence."""
@@ -189,9 +212,27 @@ class WSQLExecutor:
             return crawler_name.strip().lower()
         return self._default_crawler_name
 
-    def _create_engine(self, crawler_name: str | None = None) -> WXPathEngine:
-        """Create a fresh WXPathEngine instance."""
+    def _create_engine(
+        self,
+        crawler_name: str | None = None,
+        from_clause: FromClause | None = None,
+    ) -> WXPathEngine:
+        """Create a fresh WXPathEngine instance.
+
+        Args:
+            crawler_name: Inline ``CRAWLER <name>`` override from the query,
+                if any.
+            from_clause: The originating ``FromClause``, used to validate
+                that ``CLICK`` pagination is paired with the ``playwright``
+                crawler.
+        """
         resolved_crawler_name = self._resolve_crawler_name(crawler_name)
+        if from_clause is not None:
+            _validate_click_requires_playwright(from_clause, resolved_crawler_name)
+        # Materialize an aiohttp crawler when download_delay is set so throttle
+        # policy cannot silently fall back to wxpath AutoThrottler defaults.
+        if resolved_crawler_name is None and self._download_delay is not None:
+            resolved_crawler_name = 'aiohttp'
         crawler = self._create_crawler(resolved_crawler_name)
         log.debug('Creating WXPathEngine with crawler %s', crawler)
 
@@ -215,6 +256,13 @@ class WSQLExecutor:
             'verify_ssl': self._verify_ssl,
             'headers': self._headers,
         }
+        if self._download_delay is not None:
+            from wxpath.http.policy.throttler import FixedDelayThrottler, ImpoliteThrottle
+
+            if self._download_delay > 0:
+                crawler_kwargs['throttler'] = FixedDelayThrottler(self._download_delay)
+            else:
+                crawler_kwargs['throttler'] = ImpoliteThrottle()
         if crawler_name == 'playwright':
             crawler_kwargs['stealth'] = self._playwright_stealth
         elif crawler_name == 'flaresolverr':
@@ -283,7 +331,7 @@ class WSQLExecutor:
         segments = transpile(program)
         max_depth = _get_effective_max_depth(program.main_query)
         crawler_name = program.main_query.from_clause.crawler_name
-        engine = self._create_engine(crawler_name)
+        engine = self._create_engine(crawler_name, program.main_query.from_clause)
         log.debug('Executing main query2 %s %s', segments, max_depth)
         async for output in _iter_engine_rows(
             engine.run(
@@ -362,7 +410,7 @@ class WSQLExecutor:
                     _project_cte_context_values(segments, input_context)
 
                     max_depth = _get_effective_max_depth(query)
-                    engine = self._create_engine(crawler_name)
+                    engine = self._create_engine(crawler_name, query.from_clause)
                     async for output in _iter_engine_rows(
                         engine.run(
                             segments,
@@ -458,7 +506,7 @@ class WSQLExecutor:
         rows: list[dict] = []
         errors: list[dict] = []
 
-        engine = self._create_engine(crawler_name)
+        engine = self._create_engine(crawler_name, cte.query.from_clause)
         async for output in _iter_engine_rows(
             engine.run(
                 expression=segments,
